@@ -1,6 +1,12 @@
+import os
 import numpy as np
 import streamlit as st
+from dotenv import load_dotenv
 import matplotlib.pyplot as plt
+
+load_dotenv()
+
+API_KEY = os.getenv("API_KEY")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
