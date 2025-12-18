@@ -209,6 +209,7 @@ class EMA(nn.Module):
 
         self.decay = decay
         self.ema_model = self._clone_model(model)
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def _clone_model(self, model: nn.Module) -> nn.Module:
         from copy import deepcopy
@@ -228,6 +229,57 @@ class EMA(nn.Module):
                     param.data, alpha=1 - self.decay
                 )
 
+    def load(self, checkpoint_path: str) -> None:
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        self.ema_model.load_state_dict(checkpoint["weights"])
+        self.load_state_dict(checkpoint["ema"])
+
+    def generate(
+        self,
+        label: Tensor,
+        time_steps: int = 1_000,
+        times: list[int] = [0, 15, 50, 100, 200, 300, 400, 550, 700, 999],
+    ) -> list[Tensor]:
+
+        images = []
+        label = label.to(self.device)
+
+        scheduler = DDPMScheduler(time_steps=time_steps)
+
+        with torch.no_grad():
+            model = self.ema_model.eval()
+            z = torch.randn(1, 3, 32, 32)
+            for t in reversed(range(1, time_steps)):
+                t = torch.tensor([t]).long()
+                temp = self.scheduler.beta[t] / (
+                    (torch.sqrt(1 - scheduler.alpha[t]))
+                    * (torch.sqrt(1 - scheduler.beta[t]))
+                )
+                z = (1 / (torch.sqrt(1 - scheduler.beta[t]))) * z - (
+                    temp * model(z.to(self.device), t, label).cpu()
+                )
+                if t[0] in times:
+                    images.append(z)
+                e = torch.randn(1, 3, 32, 32)
+                z = z + (e * torch.sqrt(scheduler.beta[t]))
+
+            temp = self.scheduler.beta[0] / (
+                (torch.sqrt(1 - scheduler.alpha[0]))
+                * (torch.sqrt(1 - scheduler.beta[0]))
+            )
+            x = (
+                1 / (torch.sqrt(1 - scheduler.beta[torch.tensor(0).to(self.device)]))
+            ) * z - (
+                temp
+                * model(
+                    z.to(self.device), torch.tensor([0]).to(self.device), label
+                ).cpu()
+            )
+
+            images.append(x)
+
+            return images
+
 
 dataset = CIFAR10(
     root="./data",
@@ -242,7 +294,7 @@ dataset = CIFAR10(
 )
 
 
-class ModelWrapper:
+class ModelTrainer:
     def __init__(
         self,
         batch_size: int = 64,
@@ -311,60 +363,6 @@ class ModelWrapper:
         }
 
         torch.save(checkpoint, checkpoint_output_path)
-
-    def generate(
-        self,
-        checkpoint_path: str,
-        label: Tensor,
-    ) -> list[Tensor]:
-
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
-        self.model.load_state_dict(checkpoint["weights"])
-        self.ema.load_state_dict(checkpoint["ema"])
-
-        times = [0, 15, 50, 100, 200, 300, 400, 550, 700, 999]
-        images = []
-
-        label = label.to(self.device)
-
-        with torch.no_grad():
-            model = self.ema.ema_model.eval()
-            z = torch.randn(1, 3, 32, 32)
-            for t in reversed(range(1, self.time_steps)):
-                t = torch.tensor([t]).long()
-                temp = self.scheduler.beta[t] / (
-                    (torch.sqrt(1 - self.scheduler.alpha[t]))
-                    * (torch.sqrt(1 - self.scheduler.beta[t]))
-                )
-                z = (1 / (torch.sqrt(1 - self.scheduler.beta[t]))) * z - (
-                    temp * model(z.to(self.device), t, label).cpu()
-                )
-                if t[0] in times:
-                    images.append(z)
-                e = torch.randn(1, 3, 32, 32)
-                z = z + (e * torch.sqrt(self.scheduler.beta[t]))
-
-            temp = self.scheduler.beta[0] / (
-                (torch.sqrt(1 - self.scheduler.alpha[0]))
-                * (torch.sqrt(1 - self.scheduler.beta[0]))
-            )
-            x = (
-                1
-                / (
-                    torch.sqrt(
-                        1 - self.scheduler.beta[torch.tensor(0).to(self.device)]
-                    )
-                )
-            ) * z - (
-                temp
-                * model(
-                    z.to(self.device), torch.tensor([0]).to(self.device), label
-                ).cpu()
-            )
-
-            images.append(x)
-
-            return images
 
 
 class LabelEncoder:
