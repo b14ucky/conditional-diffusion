@@ -263,7 +263,7 @@ class EMA(nn.Module):
                 e = torch.randn(1, 3, 32, 32)
                 z = z + (e * torch.sqrt(scheduler.beta[t]))
 
-            temp = self.scheduler.beta[0] / (
+            temp = scheduler.beta[0] / (
                 (torch.sqrt(1 - scheduler.alpha[0]))
                 * (torch.sqrt(1 - scheduler.beta[0]))
             )
