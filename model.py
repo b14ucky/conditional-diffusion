@@ -238,7 +238,7 @@ class EMA(nn.Module):
         self,
         label: Tensor,
         time_steps: int = 1_000,
-        times: list[int] = [0, 15, 50, 100, 200, 300, 400, 550, 700, 999],
+        times: list[int] | None = [0, 15, 50, 100, 200, 300, 400, 550, 700, 999],
     ) -> list[Tensor]:
 
         images = []
@@ -258,7 +258,7 @@ class EMA(nn.Module):
                 z = (1 / (torch.sqrt(1 - scheduler.beta[t]))) * z - (
                     temp * model(z.to(self.device), t, label).cpu()
                 )
-                if t[0] in times:
+                if times and t[0] in times:
                     images.append(z)
                 e = torch.randn(1, 3, 32, 32)
                 z = z + (e * torch.sqrt(scheduler.beta[t]))
