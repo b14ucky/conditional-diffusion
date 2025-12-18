@@ -251,7 +251,7 @@ class EMA(nn.Module):
             z = torch.randn(1, 3, 32, 32)
             for t in reversed(range(1, time_steps)):
                 t = torch.tensor([t]).long()
-                temp = self.scheduler.beta[t] / (
+                temp = scheduler.beta[t] / (
                     (torch.sqrt(1 - scheduler.alpha[t]))
                     * (torch.sqrt(1 - scheduler.beta[t]))
                 )
