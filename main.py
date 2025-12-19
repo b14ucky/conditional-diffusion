@@ -6,6 +6,7 @@ from google.genai import types
 from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
+from model import LabelEncoder, EMA, UNet
 
 load_dotenv()
 
@@ -20,7 +21,7 @@ def display_chat_history(history: list[dict]) -> None:
             st.markdown(message["content"])
             figure = message.get("figure", None)
             if figure:
-                st.pyplot(figure)
+                st.pyplot(figure, use_container_width=False)
 
 
 def get_contents_from_history(history: list[dict]) -> list[types.Content]:
@@ -38,10 +39,35 @@ def get_contents_from_history(history: list[dict]) -> list[types.Content]:
     return contents
 
 
+if "model" not in st.session_state:
+    st.session_state.model = EMA(model=UNet())
+    st.session_state.model.load("./models/checkpoint.pt")
+
+if "encoder" not in st.session_state:
+    labels = [
+        "airplane",
+        "automobile",
+        "bird",
+        "cat",
+        "deer",
+        "dog",
+        "frog",
+        "horse",
+        "ship",
+        "truck",
+    ]
+    st.session_state.encoder = LabelEncoder(labels)
+
+
 def generate_cifar_image(label: str) -> Figure:
-    fig = plt.figure()
-    plt.title(label)
-    plt.bar(np.arange(10), np.random.rand(10))
+    print(f"{label = }")
+    label_tensor = st.session_state.encoder(label)
+    image = st.session_state.model.generate(label=label_tensor, times=None)
+    fig = plt.figure(figsize=(2, 2))
+    image = image[0].squeeze(0)
+    image = image.permute(1, 2, 0).detach().numpy()
+    plt.imshow(image)
+    plt.axis("off")
     return fig
 
 
@@ -70,6 +96,8 @@ config = types.GenerateContentConfig(
     If user asks you to generate an image you invoke the diffusion model trained on CIFAR-10 dataset,
     only if the user wants to generate an image from the classes available in the dataset.
     Only then you call the function with appropriate class name.
+    If the user asks for something like a car for example, you should pass the correct class name
+    to the function, so for the car it would be 'automobile', etc.
     Otherwise you should tell the user, that it is not possible to generate the desired image.
     Make sure to always respond with some kind of a nice reply, like "Here's your image of a cat" """,
     tools=[tool],
@@ -107,14 +135,15 @@ if prompt:
         for chunk in chat.send_message_stream(prompt):
             if hasattr(chunk, "function_calls"):
                 if chunk.function_calls:
-                    fig_container[0] = generate_cifar_image(**chunk.function_calls[0].args)  # type: ignore
+                    with st.spinner("Generating..."):
+                        fig_container[0] = generate_cifar_image(**chunk.function_calls[0].args)  # type: ignore
 
             yield chunk.text if chunk.text else ""
 
     with st.chat_message("assistant"):
         response = st.write_stream(stream_generator())
         if fig_container[0]:
-            st.pyplot(fig_container[0])
+            st.pyplot(fig_container[0], use_container_width=False)
 
     st.session_state.history.append(
         {
